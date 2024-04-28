@@ -2,18 +2,43 @@ use std::{fs, path::PathBuf};
 
 use ariadne::{Label, Report, ReportKind, Source, Span};
 use chumsky::{chain::Chain, Parser as CParser, Stream};
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use crust::{Ast, Token};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
-struct Args {
-    file: PathBuf,
+struct Cli {
+    #[command(subcommand)]
+    commands: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Build(BuildArgs),
+    Run(RunArgs),
+}
+
+#[derive(Args, Debug)]
+struct BuildArgs {
+    input: PathBuf,
+    output: PathBuf,
+}
+
+#[derive(Args, Debug)]
+#[command(version, about)]
+struct RunArgs {
+    input: PathBuf,
 }
 
 fn main() {
-    let args = Args::parse();
-    let source = match fs::read_to_string(&args.file) {
+    match Cli::parse().commands {
+        Commands::Build(args) => build(args),
+        Commands::Run(args) => run(args),
+    }
+}
+
+fn build(args: BuildArgs) {
+    let source = match fs::read_to_string(&args.input) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("Failed to read file: {e}");
@@ -22,7 +47,12 @@ fn main() {
     };
 
     let source_len = source.chars().len();
-    let filename = args.file.file_name().unwrap().to_string_lossy().to_string();
+    let filename = args
+        .input
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     let (Some(tokens), lexer_errors) = Token::lexer().parse_recovery(source.as_str()) else {
         eprintln!("Failed to generate tokens...");
         return;
@@ -51,5 +81,38 @@ fn main() {
             .unwrap();
     }
 
-    println!("{ast:?}")
+    if !parse_errors.is_empty() || !lexer_errors.is_empty() {
+        std::process::exit(-1);
+    }
+
+    let serialized = match serde_json::to_string_pretty(&ast) {
+        Ok(s) => s,
+        Err(e) => {
+            eprint!("Failed to serialize AST: {e}");
+            return;
+        }
+    };
+
+    fs::write(args.output, serialized).unwrap();
+}
+
+fn run(args: RunArgs) {
+    let source = match fs::read_to_string(&args.input) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("Failed to read file: {e}");
+            return;
+        }
+    };
+
+    let ast = match serde_json::from_str::<Ast>(&source) {
+        Ok(ast) => ast,
+        Err(e) => {
+            eprint!("Error reading C IR: {e}");
+            return;
+        }
+    };
+
+    let exit_code = ast.run_main();
+    println!("Exit Code: {exit_code}");
 }

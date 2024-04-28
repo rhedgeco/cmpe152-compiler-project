@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chumsky::{
     error::Simple,
     primitive::{filter_map, just},
@@ -5,10 +7,11 @@ use chumsky::{
     recursive::recursive,
     Error, Parser,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::Token;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Ast {
     pub defs: Vec<Definition>,
 }
@@ -20,20 +23,32 @@ impl Ast {
             .at_least(1)
             .map(|defs| Self { defs })
     }
+
+    pub fn run_main(&self) -> i32 {
+        let mut funcs = HashMap::new();
+        for def in &self.defs {
+            match def {
+                Definition::Func(func) => {
+                    if let Some(_) = funcs.insert(func.name.clone(), func.clone()) {
+                        panic!("Duplicate functions with name {}", func.name);
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        let Some(main_func) = funcs.get("main") else {
+            panic!("main function not found");
+        };
+
+        main_func.clone().eval(&mut Vec::new(), &mut funcs)
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Definition {
-    Struct {
-        name: String,
-        params: Vec<Param>,
-    },
-    Func {
-        name: String,
-        params: Vec<Param>,
-        ret: String,
-        body: Vec<Statement>,
-    },
+    Struct { name: String, params: Vec<Param> },
+    Func(Func),
 }
 
 impl Definition {
@@ -79,18 +94,41 @@ impl Definition {
                         |_| Vec::new(),
                     )),
             )
-            .map(|(((ret, name), params), body)| Self::Func {
-                name,
-                params,
-                ret,
-                body,
+            .map(|(((ret, name), params), body)| {
+                Self::Func(Func {
+                    name,
+                    params,
+                    ret,
+                    body,
+                })
             });
 
         r#struct.or(func)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Func {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: String,
+    pub body: Vec<Statement>,
+}
+
+impl Func {
+    fn eval(&self, vars: &mut Vec<(String, i32)>, funcs: &mut HashMap<String, Func>) -> i32 {
+        for statement in &self.body {
+            match statement.eval(vars, funcs) {
+                Some(value) => return value,
+                None => (),
+            }
+        }
+
+        panic!("reached end of function with no return");
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Param {
     pub name: String,
     pub ty: String,
@@ -104,7 +142,7 @@ impl Param {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     Invalid,
     Return(Box<Expr>),
@@ -135,9 +173,25 @@ impl Statement {
 
         ret.or(assign)
     }
+
+    fn eval(
+        &self,
+        vars: &mut Vec<(String, i32)>,
+        funcs: &mut HashMap<String, Func>,
+    ) -> Option<i32> {
+        match self {
+            Self::Invalid => panic!("reached invalid statement"),
+            Self::Return(expr) => Some(expr.eval(vars, funcs)),
+            Self::Assign { ty: _, name, expr } => {
+                let value = expr.eval(vars, funcs);
+                vars.push((name.clone(), value));
+                None
+            }
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Err,
     Int(u32),
@@ -208,6 +262,34 @@ impl Expr {
 
             sum
         })
+    }
+
+    fn eval(&self, vars: &mut Vec<(String, i32)>, funcs: &mut HashMap<String, Func>) -> i32 {
+        match self {
+            Self::Int(value) => *value as i32,
+            Self::Neg(expr) => -expr.eval(vars, funcs),
+            Self::Err => panic!("invalid expression found"),
+            Self::Add(lhs, rhs) => lhs.eval(vars, funcs) + rhs.eval(vars, funcs),
+            Self::Sub(lhs, rhs) => lhs.eval(vars, funcs) - rhs.eval(vars, funcs),
+            Self::Mul(lhs, rhs) => lhs.eval(vars, funcs) * rhs.eval(vars, funcs),
+            Self::Div(lhs, rhs) => lhs.eval(vars, funcs) / rhs.eval(vars, funcs),
+            Self::Var(name) => match vars.iter().rev().find(|(vname, _)| vname == name) {
+                None => panic!("undeclared variable {name}"),
+                Some((_, value)) => *value,
+            },
+            Self::Call { name, params } => {
+                let Some(func) = funcs.get(name).cloned() else {
+                    panic!("unknown function {name}");
+                };
+
+                let mut function_vars = Vec::new();
+                for (expr, param) in params.iter().zip(func.params.iter()) {
+                    function_vars.push((param.name.clone(), expr.eval(vars, funcs)));
+                }
+
+                func.eval(&mut function_vars, funcs)
+            }
+        }
     }
 }
 
