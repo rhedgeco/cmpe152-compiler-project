@@ -114,5 +114,5 @@ fn run(args: RunArgs) {
     };
 
     let exit_code = ast.run_main();
-    println!("Exit Code: {exit_code}");
+    println!("-- exited with code : {exit_code} --");
 }
