@@ -12,6 +12,7 @@ theme:
 # Overview
 
 - Project Requirements
+- Concepts Overview
 - Tooling and Design Processes
 - Implementation Details
 - Demo
@@ -25,6 +26,45 @@ theme:
 - Compiler must provide helpful error messages
 - Compiler must attempt to recover from parsing errors
 - Interpreter can load, and run the pre-compiled IR code
+
+<!-- end_slide -->
+
+# Concepts Overview
+
+## Compiler Token Generation
+
+The first phase of the compiler looks through the source code and produces tokens.
+
+Tokens are valid characters or groups of characters. For example **'+', '-', 'if', 'else', and 'struct'** would all be tokens that are parsed.
+
+Tokens can be parsed using Context Free Grammar (CFG) that come and can be converted or come in forms like Chomskys or Grienbachs.
+I experimented with this but ultimately found more success using a newer method called Parsing Expression Grammars (PEG).
+So I converted all my CFGs that I had into PEGs for the compiler.
+
+<!-- end_slide -->
+
+# Concepts Overview
+
+## What is a PEG
+
+Parsing expression grammars are very similar to CFGs. They are context free but explicityly unambiguous.
+The unambiguous nature allowed the compiler to generate tokens orders of magnitudes fastere than my CFG verions.
+
+It works by selecting tokens in an ordered manner and the ordering of expressions determines how tokens will be selected.
+
+It is conjectured that there exist context-free languages that cannot be recognized by a PEG, but this is not yet proven.
+
+For example:
+
+```python
+IDENTIFIER -> ASCII_ALPHABETIC? + ASCII_ALPHANUMERIC*
+
+CONST_DECLARE -> const ~ IDENTIFIER
+SCOPED_DELARE -> IDENTIFIER
+
+# const comes first in the 'or' selection
+DECLERATION -> CONST_DECLARE | SCOPED_DECLARE
+```
 
 <!-- end_slide -->
 
@@ -72,7 +112,8 @@ The compiler uses the **_chomsky_** library for parsing text into tokens, and fo
 
 **_chomsky_** is a library that exposes an API for more easily working and building a variation of PEGs.
 
-PEGs are useful because they are deterministic through the ordering of the expressions.
+It also allows for robust expression for error recovery within the PEG so that once an error is found,
+it can attempt to recover the context and provide helpful error messages down the line for more errors.
 
 <!-- end_slide -->
 
