@@ -1,12 +1,12 @@
 int main()
 {
    // random comment
-   int x = 5;
-   int y = 4;
-   return add(x, y);
+   int x = 6;
+   int y = 9;
+   return sub(y, x);
 }
 
-int add(int x, int y)
+int sub(int x, int y)
 {
-   return x + y;
+   return x - y;
 }
